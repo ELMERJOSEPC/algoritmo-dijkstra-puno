@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Dijkstra Visual - Mapa de Puno</title>
+    <style>
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            margin: 20px; 
+            background-color: #f4f7f6;
+        }
+        h2 { margin-top: 0; color: #2c3e50; }
+        #mapa { 
+            height: 650px; 
+            width: 100%; 
+            border-radius: 10px; 
+            border: 2px solid #bdc3c7; 
+            margin-top: 15px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        .panel { 
+            padding: 20px; 
+            background: #ffffff; 
+            border-radius: 10px; 
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1); 
+        }
+        .estado { 
+            font-weight: bold; 
+            color: #0d47a1; 
+            margin-top: 15px; 
+            padding: 12px;
+            background-color: #e3f2fd;
+            border-left: 4px solid #1976d2;
+            border-radius: 4px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #e53935;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        button:hover { background-color: #c62828; }
+    </style>
+</head>
+<body>
+
+    <div class="panel">
+        <h2>Buscador de Rutas con IA (Algoritmo de Dijkstra)</h2>
+        <p><strong>Instrucciones:</strong> Haz clic en un marcador azul para fijar tu <strong>Origen</strong>. Luego, haz clic en otro para fijar tu <strong>Destino</strong> y observa cómo "piensa" el algoritmo.</p>
+        
+        <div class="estado" id="mensaje-estado">
+            ⏳ Esperando selección de Origen...
+        </div>
+        
+        <button onclick="reiniciarSeleccion()">↻ Reiniciar Mapa</button>
+    </div>
+
+    <div id="mapa"></div>
+
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyA-DKRSEm4PjJzYOm3CQdJZxV27IMWyLF8&callback=iniciarMapa" async defer></script>
+
+    <script>
+        let mapa;
+        let directionsService;
+        let directionsRenderer;
+        
+        let nodoOrigen = null;
+        let nodoDestino = null;
+        let marcadores = {};
+        let lineasExploracion = []; 
+
+        // Coordenadas ampliadas de Puno
+        const lugaresPuno = {
+            'Plaza de Armas': { lat: -15.84054, lng: -70.02808 },
+            'Catedral': { lat: -15.83787, lng: -70.02794 },
+            'Parque Pino': { lat: -15.83840, lng: -70.02310 },
+            'Mercado Central': { lat: -15.83757, lng: -70.02664 },
+            'Puerto Muelle': { lat: -15.83649, lng: -70.01531 },
+            'Terminal Terrestre': { lat: -15.84324, lng: -70.01750 },
+            'Hospital': { lat: -15.84226, lng: -70.02149 }, 
+            'Estadio': { lat: -15.83716, lng: -70.02219 },  
+            'Universidad': { lat: -15.82556, lng: -70.01612} 
+        };
+
+        function iniciarMapa() {
+            directionsService = new google.maps.DirectionsService();
+            // suppressMarkers: true evita que Google dibuje sus propios iconos A y B
+            directionsRenderer = new google.maps.DirectionsRenderer({ suppressMarkers: true });
+
+            mapa = new google.maps.Map(document.getElementById('mapa'), {
+                center: lugaresPuno['Plaza de Armas'],
+                zoom: 14,
+                mapTypeControl: false
+            });
+
+            directionsRenderer.setMap(mapa);
+
+            // Crear marcadores interactivos
+            for (const [nombre, coordenadas] of Object.entries(lugaresPuno)) {
+                const marcador = new google.maps.Marker({
+                    position: coordenadas,
+                    map: mapa,
+                    title: nombre,
+                    icon: 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png' // Color por defecto
+                });
+
+                marcador.addListener('click', () => manejarClicMarcador(nombre, marcador));
+                marcadores[nombre] = marcador;
+            }
+        }
+
+        function manejarClicMarcador(nombre, marcador) {
+            const mensaje = document.getElementById('mensaje-estado');
+
+            if (!nodoOrigen) {
+                nodoOrigen = nombre;
+                // Cambiar icono a verde para el Origen
+                marcador.setIcon('http://maps.google.com/mapfiles/ms/icons/green-dot.png');
+                mensaje.innerHTML = `🟢 Origen: <strong>${nombre}</strong>. Ahora selecciona el Destino.`;
+            } 
+            else if (!nodoDestino && nombre !== nodoOrigen) {
+                nodoDestino = nombre;
+                // Cambiar icono a rojo para el Destino
+                marcador.setIcon('http://maps.google.com/mapfiles/ms/icons/red-dot.png');
+                mensaje.innerHTML = `⚙️ Algoritmo Dijkstra buscando ruta en tiempo real...`;
+                
+                solicitarRutaDijkstra();
+            }
+        }
+
+        function solicitarRutaDijkstra() {
+            fetch('/calcular_dijkstra', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ origen: nodoOrigen, destino: nodoDestino })
+            })
+            .then(respuesta => respuesta.json())
+            .then(datos => {
+                animarBusqueda(datos.exploracion, datos.ruta);
+            })
+            .catch(error => {
+                console.error("Error en la conexión con Python:", error);
+                document.getElementById('mensaje-estado').innerHTML = "❌ Error de conexión con el servidor.";
+            });
+        }
+
+        function animarBusqueda(pasosExploracion, rutaFinal) {
+            let pasoActual = 0;
+
+            function dibujarPaso() {
+                if (pasoActual < pasosExploracion.length) {
+                    const paso = pasosExploracion[pasoActual];
+                    const coordDesde = lugaresPuno[paso.desde];
+                    const coordHacia = lugaresPuno[paso.hacia];
+
+                    // Dibujar la línea de escaneo temporal
+                    const lineaEscaneo = new google.maps.Polyline({
+                        path: [coordDesde, coordHacia],
+                        geodesic: true,
+                        strokeColor: '#7f8c8d', 
+                        strokeOpacity: 0.7,
+                        strokeWeight: 4,
+                        map: mapa
+                    });
+                    
+                    lineasExploracion.push(lineaEscaneo); 
+                    
+                    document.getElementById('mensaje-estado').innerHTML = `🔍 Explorando costo de calle: <strong>${paso.desde}</strong> ➔ <strong>${paso.hacia}</strong>`;
+                    
+                    pasoActual++;
+                    setTimeout(dibujarPaso, 400); // Velocidad de la animación (400ms)
+                } else {
+                    document.getElementById('mensaje-estado').innerHTML = `✅ ¡Ruta óptima encontrada! Trazando sobre asfalto...`;
+                    dibujarEnCallesReales(rutaFinal);
+                }
+            }
+
+            dibujarPaso();
+        }
+
+        function dibujarEnCallesReales(listaNodos) {
+            if (listaNodos.length < 2) return;
+
+            const puntosRuta = listaNodos.map(nombre => lugaresPuno[nombre]);
+            const origen = puntosRuta[0];
+            const destino = puntosRuta[puntosRuta.length - 1];
+            
+            const waypoints = [];
+            for (let i = 1; i < puntosRuta.length - 1; i++) {
+                waypoints.push({
+                    location: new google.maps.LatLng(puntosRuta[i].lat, puntosRuta[i].lng),
+                    stopover: true
+                });
+            }
+
+            const request = {
+                origin: origen,
+                destination: destino,
+                waypoints: waypoints,
+                travelMode: google.maps.TravelMode.DRIVING,
+                optimizeWaypoints: false // CRUCIAL para respetar el orden de Dijkstra
+            };
+
+            directionsService.route(request, function(result, status) {
+                if (status === 'OK') {
+                    directionsRenderer.setDirections(result);
+                    document.getElementById('mensaje-estado').innerHTML = `🏁 <strong>Ruta Final:</strong> ${listaNodos.join(' ➔ ')}`;
+                } else {
+                    alert("Google Maps no pudo trazar la ruta en calles: " + status);
+                }
+            });
+        }
+
+        function reiniciarSeleccion() {
+            nodoOrigen = null;
+            nodoDestino = null;
+            directionsRenderer.setDirections({routes: []}); 
+            
+            // Borrar animación gris
+            lineasExploracion.forEach(linea => linea.setMap(null));
+            lineasExploracion = [];
+
+            document.getElementById('mensaje-estado').innerHTML = "⏳ Esperando selección de Origen...";
+            
+            // Restaurar color azul de todos los marcadores
+            for (let clave in marcadores) {
+                marcadores[clave].setIcon('http://maps.google.com/mapfiles/ms/icons/blue-dot.png');
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-Aquí tienes el texto completo y formateado para tu archivo `README.md`. Solo tienes que copiar todo lo que está dentro de este bloque y pegarlo directamente en GitHub:
+
 
 ```markdown
 # 🗺️ Buscador de Rutas IA - Mapa de Puno
